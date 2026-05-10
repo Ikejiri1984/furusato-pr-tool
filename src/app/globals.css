@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --background: #fafaf9;
+  --foreground: #171717;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(15, 118, 110, 0.16);
+}
+
+.print-area {
+  color-adjust: exact;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.print-avoid {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  body {
+    background: #ffffff !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-area {
+    max-width: none !important;
+  }
+
+  .print-area section {
+    box-shadow: none !important;
+  }
+}
