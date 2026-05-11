@@ -6,9 +6,9 @@ import { buildUserPrompt, systemPrompt } from "@/lib/prompt";
 import type { CompanyInput, GenerateResponse, ProposalOutput } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 10;
+export const maxDuration = 15;
 
-const OPENAI_TIMEOUT_MS = 5000;
+const OPENAI_TIMEOUT_MS = 15000;
 const OUTPUT_TOKEN_LIMIT = 600;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
