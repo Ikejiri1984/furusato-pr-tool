@@ -9,6 +9,20 @@ import { ProposalReport } from "@/components/ProposalReport";
 import { emptyCompanyInput, sampleCompanyInput } from "@/lib/sample";
 import type { CompanyInput, GenerateResponse } from "@/lib/types";
 
+type GenerateApiPayload = Partial<GenerateResponse> & {
+  error?: string;
+};
+
+function parseGeneratePayload(raw: string): GenerateApiPayload {
+  try {
+    return raw ? (JSON.parse(raw) as GenerateApiPayload) : {};
+  } catch {
+    return {
+      error: raw || "APIから不正なレスポンスが返されました。"
+    };
+  }
+}
+
 export function ProposalGenerator() {
   const [input, setInput] = useState<CompanyInput>(sampleCompanyInput);
   const [result, setResult] = useState<GenerateResponse | null>(null);
@@ -35,10 +49,15 @@ export function ProposalGenerator() {
         body: JSON.stringify(input)
       });
 
-      const data = await response.json();
+      const raw = await response.text();
+      const data = parseGeneratePayload(raw);
 
       if (!response.ok) {
         throw new Error(data.error || "提案生成に失敗しました。");
+      }
+
+      if (!data.proposal || typeof data.demo !== "boolean" || !data.model) {
+        throw new Error(data.error || "提案データの形式が正しくありません。");
       }
 
       setResult(data as GenerateResponse);
