@@ -6,7 +6,10 @@ import { buildUserPrompt, systemPrompt } from "@/lib/prompt";
 import type { CompanyInput, GenerateResponse, ProposalOutput } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 10;
+
+const OPENAI_TIMEOUT_MS = 7500;
+const OUTPUT_TOKEN_LIMIT = 1200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -40,34 +43,34 @@ function normalizeInput(value: unknown): CompanyInput | null {
 const plainTextOutputInstruction = `
 出力形式:
 - JSONではなく、通常の日本語テキストで出力してください。
-- 各項目は Markdown の「## 見出し」で区切ってください。
-- 見出しは次を使ってください。
+- Markdownは最小限にしてください。
+- 見出しは下記8個だけ使ってください。
+- 各見出しは1から3行、全体で1000字以内にしてください。
+- 自治体候補は3件まで、KPIは3件まで、提案タイトルは3件までにしてください。
+- 長い前置き、重複説明、表、コードブロックは出力しないでください。
   - ## エグゼクティブサマリー
   - ## 提案タイトル案
   - ## 企業分析
   - ## 想定課題
-  - ## CSR/ESG観点
-  - ## 採用課題
-  - ## 相性の良い自治体テーマ
   - ## 自治体候補
-  - ## 寄付ストーリー
   - ## PR戦略
-  - ## ニュース化アイデア
-  - ## 感謝状贈呈式案
-  - ## TV活用案
-  - ## TVer活用案
-  - ## SNS動画企画
-  - ## YouTube活用
-  - ## 自治体連携PR
-  - ## 社員出演
-  - ## 採用ブランディング
   - ## 営業提案骨子
   - ## 想定KPI
-  - ## チャネル別施策
   - ## 初回営業メール
-  - ## 次のアクション
-  - ## 留意点
 `.trim();
+
+function buildSafeFallbackPayload(
+  input: CompanyInput,
+  model: string,
+  notice: string
+): GenerateResponse {
+  return {
+    proposal: buildDemoProposal(input),
+    demo: true,
+    model,
+    notice
+  };
+}
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -339,22 +342,67 @@ export async function POST(request: Request) {
     }
 
     const client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
+      apiKey: process.env.OPENAI_API_KEY,
+      maxRetries: 0,
+      timeout: OPENAI_TIMEOUT_MS
     });
 
-    const response = await client.responses.create({
-      model,
-      instructions: systemPrompt,
-      input: `${buildUserPrompt(input)}\n\n${plainTextOutputInstruction}`
-    });
+    const response = await client.responses
+      .create(
+        {
+          model,
+          instructions: systemPrompt,
+          input: `${buildUserPrompt(input)}\n\n${plainTextOutputInstruction}`,
+          max_output_tokens: OUTPUT_TOKEN_LIMIT,
+          temperature: 0.7
+        },
+        {
+          maxRetries: 0,
+          timeout: OPENAI_TIMEOUT_MS
+        }
+      )
+      .catch((error: unknown) => {
+        const detail =
+          error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
+        return buildSafeFallbackPayload(
+          input,
+          model,
+          `AI生成が制限時間内に完了しなかったため、軽量なサンプル提案を表示しています${detail}`
+        );
+      });
+
+    if ("proposal" in response) {
+      return NextResponse.json(response);
+    }
 
     const responseError = extractResponseError(response);
 
     if (responseError) {
-      throw new Error(responseError);
+      return NextResponse.json(
+        buildSafeFallbackPayload(
+          input,
+          model,
+          `OpenAI APIでエラーが発生したため、軽量なサンプル提案を表示しています（${responseError.slice(0, 160)}）`
+        )
+      );
     }
 
-    const generatedText = extractResponseText(response);
+    let generatedText = "";
+
+    try {
+      generatedText = extractResponseText(response);
+    } catch (error) {
+      const detail =
+        error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
+      return NextResponse.json(
+        buildSafeFallbackPayload(
+          input,
+          model,
+          `AIの返答を取得できなかったため、軽量なサンプル提案を表示しています${detail}`
+        )
+      );
+    }
+
     const proposal = buildProposalFromText(input, generatedText);
     const payload: GenerateResponse = {
       proposal,
