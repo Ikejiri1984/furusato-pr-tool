@@ -103,8 +103,9 @@ function normalizeInput(value: unknown): CompanyInput | null {
 const plainTextOutputInstruction = `
 出力形式:
 - 通常テキストで返す。JSONは禁止。
-- 初回生成なので、Markdown見出しは指定の4セクションだけ使う。
-- 見出しは「## 1. 提案タイトル」のように番号付きにする。
+- Markdown見出しは指定の4セクションだけ使う。
+- 必ずSTEP1を先に出し、その分析結果を使ってSTEP2を出す。
+- 見出しは「## STEP1. 企業戦略分析」のように書く。
 - 各セクションは1から4行を目安に簡潔に書く。
 - TV/TVer/SNS施策、ニュース化シナリオ、営業活用、KPIは詳細生成用なので書かない。
 - 表、コードブロック、長い前置きは禁止。
@@ -130,7 +131,7 @@ function escapeRegExp(value: string) {
 function getSection(text: string, headings: string[]) {
   const headingPattern = headings.map(escapeRegExp).join("|");
   const pattern = new RegExp(
-    `(?:^|\\n)#{1,3}\\s*(?:\\d+[.)]\\s*)?(?:${headingPattern})\\s*\\n([\\s\\S]*?)(?=\\n#{1,3}\\s*(?:\\d+[.)]\\s*)?|$)`,
+    `(?:^|\\n)#{1,3}\\s*(?:(?:STEP\\s*)?\\d+(?:[-.)：:]\\d+)?[.)：:]?\\s*)?(?:${headingPattern})\\s*\\n([\\s\\S]*?)(?=\\n#{1,3}\\s*(?:(?:STEP\\s*)?\\d+(?:[-.)：:]\\d+)?[.)：:]?\\s*)?|$)`,
     "i"
   );
 
@@ -246,7 +247,11 @@ function buildProposalFromText(
     "エグゼクティブサマリー"
   ]);
   const titleSection = getSection(text, ["提案タイトル", "提案タイトル案"]);
-  const companyAnalysis = getSection(text, ["企業特性分析", "企業分析"]);
+  const companyAnalysis = getSection(text, [
+    "企業戦略分析",
+    "企業特性分析",
+    "企業分析"
+  ]);
   const assumedIssues = getSection(text, ["想定課題"]);
   const csrEsgPerspective = getSection(text, ["CSR/ESG観点", "CSR・ESG観点"]);
   const recruitmentIssues = getSection(text, ["採用課題"]);
