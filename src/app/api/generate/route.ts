@@ -15,6 +15,66 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function readStringField(value: unknown, key: string) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const field = value[key];
+  return typeof field === "string" ? field : undefined;
+}
+
+function readNumberField(value: unknown, key: string) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const field = value[key];
+  return typeof field === "number" ? field : undefined;
+}
+
+function getErrorBody(error: unknown) {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+
+  return error.error;
+}
+
+function logOpenAIError(context: string, error: unknown) {
+  const errorBody = getErrorBody(error);
+  const nestedError =
+    isRecord(errorBody) && isRecord(errorBody.error)
+      ? errorBody.error
+      : errorBody;
+
+  console.error("[api/generate] OpenAI API error", {
+    context,
+    statusCode: readNumberField(error, "status"),
+    errorMessage:
+      readStringField(nestedError, "message") ||
+      readStringField(error, "message"),
+    errorType:
+      readStringField(nestedError, "type") || readStringField(error, "type"),
+    errorCode:
+      readStringField(nestedError, "code") || readStringField(error, "code"),
+    errorParam:
+      readStringField(nestedError, "param") || readStringField(error, "param"),
+    requestID: readStringField(error, "requestID"),
+    errorBody,
+    stack: error instanceof Error ? error.stack : undefined
+  });
+}
+
+function logRouteError(context: string, error: unknown) {
+  console.error("[api/generate] route error", {
+    context,
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    error
+  });
+}
+
 function isStringRecord(value: unknown): value is Record<string, string> {
   return (
     isRecord(value) &&
@@ -355,6 +415,8 @@ export async function POST(request: Request) {
         }
       )
       .catch((error: unknown) => {
+        logOpenAIError("client.responses.create", error);
+
         const detail =
           error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
         return buildSafeFallbackPayload(
@@ -371,6 +433,11 @@ export async function POST(request: Request) {
     const responseError = extractResponseError(response);
 
     if (responseError) {
+      console.error("[api/generate] OpenAI response returned error", {
+        errorMessage: responseError,
+        response
+      });
+
       return NextResponse.json(
         buildSafeFallbackPayload(
           input,
@@ -385,6 +452,8 @@ export async function POST(request: Request) {
     try {
       generatedText = extractResponseText(response);
     } catch (error) {
+      logRouteError("extractResponseText", error);
+
       const detail =
         error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
       return NextResponse.json(
@@ -405,6 +474,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json(payload);
   } catch (error) {
+    logRouteError("POST", error);
+
     const message = (
       error instanceof Error
         ? error.message
