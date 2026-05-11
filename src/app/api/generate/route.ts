@@ -8,8 +8,8 @@ import type { CompanyInput, GenerateResponse, ProposalOutput } from "@/lib/types
 export const runtime = "nodejs";
 export const maxDuration = 15;
 
-const OPENAI_TIMEOUT_MS = 15000;
-const OUTPUT_TOKEN_LIMIT = 1800;
+const OPENAI_TIMEOUT_MS = 12000;
+const OUTPUT_TOKEN_LIMIT = 900;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -103,9 +103,10 @@ function normalizeInput(value: unknown): CompanyInput | null {
 const plainTextOutputInstruction = `
 出力形式:
 - 通常テキストで返す。JSONは禁止。
-- Markdown見出しは指定の9セクションだけ使う。
+- 初回生成なので、Markdown見出しは指定の4セクションだけ使う。
 - 見出しは「## 1. 提案タイトル」のように番号付きにする。
-- 各セクションは3から6行を目安に簡潔に書く。
+- 各セクションは1から4行を目安に簡潔に書く。
+- TV/TVer/SNS施策、ニュース化シナリオ、営業活用、KPIは詳細生成用なので書かない。
 - 表、コードブロック、長い前置きは禁止。
 `.trim();
 
@@ -245,7 +246,7 @@ function buildProposalFromText(
     "エグゼクティブサマリー"
   ]);
   const titleSection = getSection(text, ["提案タイトル", "提案タイトル案"]);
-  const companyAnalysis = getSection(text, ["企業分析"]);
+  const companyAnalysis = getSection(text, ["企業特性分析", "企業分析"]);
   const assumedIssues = getSection(text, ["想定課題"]);
   const csrEsgPerspective = getSection(text, ["CSR/ESG観点", "CSR・ESG観点"]);
   const recruitmentIssues = getSection(text, ["採用課題"]);
