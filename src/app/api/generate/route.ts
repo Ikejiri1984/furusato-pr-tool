@@ -353,8 +353,7 @@ export async function POST(request: Request) {
           model,
           instructions: systemPrompt,
           input: `${buildUserPrompt(input)}\n\n${plainTextOutputInstruction}`,
-          max_output_tokens: OUTPUT_TOKEN_LIMIT,
-          temperature: 0.7
+          max_output_tokens: OUTPUT_TOKEN_LIMIT
         },
         {
           maxRetries: 0,
