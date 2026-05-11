@@ -8,8 +8,8 @@ import type { CompanyInput, GenerateResponse, ProposalOutput } from "@/lib/types
 export const runtime = "nodejs";
 export const maxDuration = 10;
 
-const OPENAI_TIMEOUT_MS = 7500;
-const OUTPUT_TOKEN_LIMIT = 1200;
+const OPENAI_TIMEOUT_MS = 5000;
+const OUTPUT_TOKEN_LIMIT = 600;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -42,21 +42,11 @@ function normalizeInput(value: unknown): CompanyInput | null {
 
 const plainTextOutputInstruction = `
 出力形式:
-- JSONではなく、通常の日本語テキストで出力してください。
-- Markdownは最小限にしてください。
-- 見出しは下記8個だけ使ってください。
-- 各見出しは1から3行、全体で1000字以内にしてください。
-- 自治体候補は3件まで、KPIは3件まで、提案タイトルは3件までにしてください。
-- 長い前置き、重複説明、表、コードブロックは出力しないでください。
-  - ## エグゼクティブサマリー
-  - ## 提案タイトル案
-  - ## 企業分析
-  - ## 想定課題
-  - ## 自治体候補
-  - ## PR戦略
-  - ## 営業提案骨子
-  - ## 想定KPI
-  - ## 初回営業メール
+- 通常テキストで返す。JSONは禁止。
+- streamなしの初回表示用なので、詳細は書かない。
+- セクションは最大4個、原則2個だけ。
+- 必須見出しは「## 提案タイトル」「## 提案概要」。
+- 全体300字以内。表、コードブロック、長い箇条書きは禁止。
 `.trim();
 
 function buildSafeFallbackPayload(
@@ -189,8 +179,11 @@ function buildProposalFromText(
     return fallback;
   }
 
-  const executiveSummary = getSection(text, ["エグゼクティブサマリー"]);
-  const titleSection = getSection(text, ["提案タイトル案"]);
+  const executiveSummary = getSection(text, [
+    "提案概要",
+    "エグゼクティブサマリー"
+  ]);
+  const titleSection = getSection(text, ["提案タイトル", "提案タイトル案"]);
   const companyAnalysis = getSection(text, ["企業分析"]);
   const assumedIssues = getSection(text, ["想定課題"]);
   const csrEsgPerspective = getSection(text, ["CSR/ESG観点", "CSR・ESG観点"]);
@@ -220,7 +213,7 @@ function buildProposalFromText(
     proposalTitles: toList(titleSection, fallback.proposalTitles),
     executiveSummary:
       executiveSummary || firstParagraph(text, fallback.executiveSummary),
-    companyAnalysis: companyAnalysis || text,
+    companyAnalysis: companyAnalysis || executiveSummary || text,
     assumedIssues: toList(assumedIssues, fallback.assumedIssues),
     csrEsgPerspective: toList(csrEsgPerspective, fallback.csrEsgPerspective),
     recruitmentIssues: toList(recruitmentIssues, fallback.recruitmentIssues),
@@ -353,7 +346,8 @@ export async function POST(request: Request) {
           model,
           instructions: systemPrompt,
           input: `${buildUserPrompt(input)}\n\n${plainTextOutputInstruction}`,
-          max_output_tokens: OUTPUT_TOKEN_LIMIT
+          max_output_tokens: OUTPUT_TOKEN_LIMIT,
+          stream: false
         },
         {
           maxRetries: 0,
