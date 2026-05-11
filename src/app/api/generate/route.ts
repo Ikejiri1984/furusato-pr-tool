@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 15;
 
 const OPENAI_TIMEOUT_MS = 15000;
-const OUTPUT_TOKEN_LIMIT = 600;
+const OUTPUT_TOKEN_LIMIT = 1800;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -103,10 +103,10 @@ function normalizeInput(value: unknown): CompanyInput | null {
 const plainTextOutputInstruction = `
 出力形式:
 - 通常テキストで返す。JSONは禁止。
-- streamなしの初回表示用なので、詳細は書かない。
-- セクションは最大4個、原則2個だけ。
-- 必須見出しは「## 提案タイトル」「## 提案概要」。
-- 全体300字以内。表、コードブロック、長い箇条書きは禁止。
+- Markdown見出しは指定の9セクションだけ使う。
+- 見出しは「## 1. 提案タイトル」のように番号付きにする。
+- 各セクションは3から6行を目安に簡潔に書く。
+- 表、コードブロック、長い前置きは禁止。
 `.trim();
 
 function buildSafeFallbackPayload(
@@ -127,8 +127,9 @@ function escapeRegExp(value: string) {
 }
 
 function getSection(text: string, headings: string[]) {
+  const headingPattern = headings.map(escapeRegExp).join("|");
   const pattern = new RegExp(
-    `(?:^|\\n)#{1,3}\\s*(?:${headings.map(escapeRegExp).join("|")})\\s*\\n([\\s\\S]*?)(?=\\n#{1,3}\\s|$)`,
+    `(?:^|\\n)#{1,3}\\s*(?:\\d+[.)]\\s*)?(?:${headingPattern})\\s*\\n([\\s\\S]*?)(?=\\n#{1,3}\\s*(?:\\d+[.)]\\s*)?|$)`,
     "i"
   );
 
@@ -252,18 +253,31 @@ function buildProposalFromText(
   const municipalityCandidates = getSection(text, ["自治体候補"]);
   const donationStory = getSection(text, ["寄付ストーリー"]);
   const prStrategy = getSection(text, ["PR戦略"]);
-  const newsIdeas = getSection(text, ["ニュース化アイデア"]);
+  const newsIdeas = getSection(text, [
+    "ニュース化シナリオ",
+    "ニュース化アイデア"
+  ]);
   const ceremonyPlan = getSection(text, ["感謝状贈呈式案"]);
   const tvPlan = getSection(text, ["TV活用案"]);
   const tverPlan = getSection(text, ["TVer活用案"]);
-  const snsVideoIdeas = getSection(text, ["SNS動画企画", "SNSショート動画企画"]);
+  const snsVideoIdeas = getSection(text, [
+    "TV/TVer/SNS施策",
+    "SNS動画企画",
+    "SNSショート動画企画"
+  ]);
   const youtubePlan = getSection(text, ["YouTube活用", "YouTube活用案"]);
   const localGovernmentPr = getSection(text, ["自治体連携PR"]);
   const employeeAppearancePlan = getSection(text, ["社員出演"]);
   const recruitmentBranding = getSection(text, ["採用ブランディング"]);
-  const salesProposalOutline = getSection(text, ["営業提案骨子"]);
+  const salesProposalOutline = getSection(text, [
+    "営業活用方法",
+    "営業提案骨子"
+  ]);
   const kpis = getSection(text, ["想定KPI"]);
-  const channelPlans = getSection(text, ["チャネル別施策"]);
+  const channelPlans = getSection(text, [
+    "TV/TVer/SNS施策",
+    "チャネル別施策"
+  ]);
   const salesEmail = getSection(text, ["初回営業メール"]);
   const nextActions = getSection(text, ["次のアクション"]);
   const riskNotes = getSection(text, ["留意点"]);
