@@ -1,4 +1,4 @@
-import type { CompanyInput } from "@/lib/types";
+import type { CompanyInput, StrategicAnalysis } from "@/lib/types";
 
 export const systemPrompt = `
 あなたはテレビ局営業、自治体営業、PRコンサル、中小企業診断士、地域創生プロデューサーです。
@@ -48,47 +48,81 @@ CSR情報: ${clip(input.csr, 160) || "未入力"}
 
 export function buildAnalysisPrompt(input: CompanyInput) {
   return `
-以下の企業情報をもとに、STEP1として企業戦略分析だけを作成してください。
+以下の企業情報をもとに、STEP1として軽量な企業分析JSONだけを作成してください。
 
 ${formatCompanyInput(input)}
 
 出力要件:
+- JSONのみ。Markdown禁止。
 - 500 tokens以内。
-- STEP2の提案は書かない。
-- 一般論は禁止。企業情報から読み取れる仮説として書く。
-- 以下7項目をそれぞれ1行で書く。
+- STEP2の提案、自治体名、施策詳細は書かない。
+- 各値は80字以内。一般論は禁止。
+- 必ず以下キーだけを返す。
 
-## 事業構造
-## 競争環境
-## 採用課題
-## 人的資本課題
-## ESG文脈
-## ニュース化要素
-## 自治体と接続すべき理由
+{
+  "companyAnalysis": "企業分析",
+  "competitiveAdvantage": "競争優位性",
+  "industryIssues": "業界課題",
+  "regionalFit": "地域相性",
+  "donationThemeHypothesis": "寄付テーマ仮説"
+}
 `.trim();
 }
 
-export function buildProposalPrompt(input: CompanyInput, analysis: string) {
+export function buildProposalPrompt(
+  input: CompanyInput,
+  analysis: StrategicAnalysis
+) {
   return `
 以下のSTEP1分析結果を使って、STEP2として提案だけを作成してください。
 重要: STEP1を再計算しない。分析結果を前提に「なぜこの企業にこの自治体なのか」を具体的に説明してください。
 
 ${formatCompanyInput(input)}
 
-STEP1分析結果:
-${clip(analysis, 1400)}
+STEP1分析JSON:
+${JSON.stringify(analysis)}
 
 出力要件:
 - 一般論、どの企業にも言える表現は禁止。
 - 「地域共創」という抽象ワードの連発は禁止。
 - 業界構造や市場変化を踏まえる。
 - 自治体候補は3つ。それぞれ相性、テーマ、ニュース化ポイントを書く。
-- TV/TVer/SNS施策、営業活用、KPIの詳細は後続詳細生成に回すため、PR戦略とニュース化シナリオは要点だけ。
+- KPI、営業メール、PDF用詳細、役員説明はSTEP3で扱うため書かない。
 
 ## 提案タイトル
 ## 提案概要
 ## 自治体候補
 ## PR戦略
+## TV/TVer/SNS施策
 ## ニュース化シナリオ
+## 営業活用方法
+`.trim();
+}
+
+export function buildDetailPrompt(
+  input: CompanyInput,
+  analysis: StrategicAnalysis,
+  proposalText: string
+) {
+  return `
+以下のSTEP1分析とSTEP2提案を前提に、STEP3の追加資料だけを作成してください。
+STEP1とSTEP2を再生成しないでください。
+
+${formatCompanyInput(input)}
+
+STEP1分析JSON:
+${JSON.stringify(analysis)}
+
+STEP2提案:
+${clip(proposalText, 1800)}
+
+出力要件:
+- KPI、営業メール、PDF用詳細、役員説明だけを出力。
+- 各セクションは短く実務で使える内容にする。
+
+## KPI
+## 営業メール
+## PDF用詳細
+## 役員説明
 `.trim();
 }

@@ -4,14 +4,17 @@ import { NextResponse } from "next/server";
 import { buildDemoProposal } from "@/lib/fallback";
 import {
   buildAnalysisPrompt,
+  buildDetailPrompt,
   buildProposalPrompt,
   systemPrompt
 } from "@/lib/prompt";
 import type {
   AnalysisResponse,
   CompanyInput,
+  DetailResponse,
   GenerateResponse,
-  ProposalOutput
+  ProposalOutput,
+  StrategicAnalysis
 } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -20,6 +23,7 @@ export const maxDuration = 15;
 const OPENAI_TIMEOUT_MS = 12000;
 const ANALYSIS_OUTPUT_TOKEN_LIMIT = 500;
 const PROPOSAL_OUTPUT_TOKEN_LIMIT = 900;
+const DETAIL_OUTPUT_TOKEN_LIMIT = 900;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -85,47 +89,48 @@ function logRouteError(context: string, error: unknown) {
   });
 }
 
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return (
-    isRecord(value) &&
-    Object.values(value).every((item) => typeof item === "string")
-  );
-}
-
 function normalizeInput(value: unknown): CompanyInput | null {
-  if (!isStringRecord(value)) {
+  if (!isRecord(value)) {
     return null;
   }
 
   return {
-    companyName: value.companyName?.trim() ?? "",
-    industry: value.industry?.trim() ?? "",
-    companyUrl: value.companyUrl?.trim() ?? "",
-    news: value.news?.trim() ?? "",
-    ir: value.ir?.trim() ?? "",
-    recruiting: value.recruiting?.trim() ?? "",
-    csr: value.csr?.trim() ?? "",
-    painPoints: value.painPoints?.trim() ?? "",
-    memo: value.memo?.trim() ?? ""
+    companyName: readStringField(value, "companyName")?.trim() ?? "",
+    industry: readStringField(value, "industry")?.trim() ?? "",
+    companyUrl: readStringField(value, "companyUrl")?.trim() ?? "",
+    news: readStringField(value, "news")?.trim() ?? "",
+    ir: readStringField(value, "ir")?.trim() ?? "",
+    recruiting: readStringField(value, "recruiting")?.trim() ?? "",
+    csr: readStringField(value, "csr")?.trim() ?? "",
+    painPoints: readStringField(value, "painPoints")?.trim() ?? "",
+    memo: readStringField(value, "memo")?.trim() ?? ""
   };
 }
 
 const analysisOutputInstruction = `
 出力形式:
-- 通常テキストで返す。JSONは禁止。
-- 企業分析だけを返す。提案タイトルや自治体候補は書かない。
-- 見出しは指定7項目だけ使う。
-- 各項目は1行。長い前置きは禁止。
+- JSONオブジェクトのみ返す。Markdownは禁止。
+- キーは companyAnalysis, competitiveAdvantage, industryIssues, regionalFit, donationThemeHypothesis の5つだけ。
+- 提案生成、自治体候補、PR施策は書かない。
 `.trim();
 
 const proposalOutputInstruction = `
 出力形式:
 - 通常テキストで返す。JSONは禁止。
 - STEP1分析結果を前提にした提案だけを返す。企業分析を再計算しない。
-- 見出しは指定5項目だけ使う。
+- 見出しは指定7項目だけ使う。
 - 自治体候補は3つ。
-- TV/TVer/SNS施策、営業活用、KPIの詳細は書かない。
+- KPI、営業メール、PDF用詳細、役員説明は書かない。
+- 初回から全セクションを膨らませない。
 - 表、コードブロック、長い前置きは禁止。
+`.trim();
+
+const detailOutputInstruction = `
+出力形式:
+- 通常テキストで返す。JSONは禁止。
+- STEP3の追加生成だけを返す。
+- 見出しは KPI、営業メール、PDF用詳細、役員説明 の4つだけ。
+- STEP1分析とSTEP2提案は再生成しない。
 `.trim();
 
 function buildSafeFallbackPayload(
@@ -144,15 +149,54 @@ function buildSafeFallbackPayload(
 function buildDemoAnalysis(input: CompanyInput) {
   const demo = buildDemoProposal(input);
 
+  return {
+    companyAnalysis: demo.companyAnalysis,
+    competitiveAdvantage: demo.csrEsgPerspective[0],
+    industryIssues: demo.assumedIssues[0],
+    regionalFit: `${demo.municipalityThemes.slice(0, 3).join("、")}と接続しやすい。`,
+    donationThemeHypothesis: demo.donationStory
+  } satisfies StrategicAnalysis;
+}
+
+function formatAnalysisText(analysis: StrategicAnalysis) {
   return [
-    `## 事業構造\n${demo.companyAnalysis}`,
-    `## 競争環境\n${demo.assumedIssues[0]}`,
-    `## 採用課題\n${demo.recruitmentIssues[0]}`,
-    `## 人的資本課題\n${demo.csrEsgPerspective[0]}`,
-    `## ESG文脈\n${demo.csrEsgPerspective[1]}`,
-    `## ニュース化要素\n${demo.newsIdeas[0]}`,
-    `## 自治体と接続すべき理由\n${demo.municipalityThemes.slice(0, 3).join("、")}と接続しやすいため。`
+    `## 企業分析\n${analysis.companyAnalysis}`,
+    `## 競争優位性\n${analysis.competitiveAdvantage}`,
+    `## 業界課題\n${analysis.industryIssues}`,
+    `## 地域相性\n${analysis.regionalFit}`,
+    `## 寄付テーマ仮説\n${analysis.donationThemeHypothesis}`
   ].join("\n\n");
+}
+
+function parseAnalysisJson(text: string, input: CompanyInput) {
+  const stripped = text
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  const jsonText = stripped.match(/\{[\s\S]*\}/)?.[0] ?? stripped;
+
+  try {
+    const parsed = JSON.parse(jsonText) as Partial<StrategicAnalysis>;
+
+    if (
+      typeof parsed.companyAnalysis === "string" &&
+      typeof parsed.competitiveAdvantage === "string" &&
+      typeof parsed.industryIssues === "string" &&
+      typeof parsed.regionalFit === "string" &&
+      typeof parsed.donationThemeHypothesis === "string"
+    ) {
+      return parsed as StrategicAnalysis;
+    }
+  } catch {
+    // Fall through to the safe demo-shaped analysis below.
+  }
+
+  const demo = buildDemoAnalysis(input);
+  return {
+    ...demo,
+    companyAnalysis: stripped || demo.companyAnalysis
+  };
 }
 
 function buildSafeAnalysisPayload(
@@ -160,25 +204,60 @@ function buildSafeAnalysisPayload(
   model: string,
   notice: string
 ): AnalysisResponse {
+  const analysis = buildDemoAnalysis(input);
+
   return {
-    analysis: buildDemoAnalysis(input),
+    analysis,
+    analysisText: formatAnalysisText(analysis),
     demo: true,
     model,
     notice
   };
 }
 
-function getMode(value: unknown): "analysis" | "proposal" {
-  return isRecord(value) && value.mode === "proposal" ? "proposal" : "analysis";
+function getMode(value: unknown): "analysis" | "proposal" | "detail" {
+  if (!isRecord(value)) {
+    return "analysis";
+  }
+
+  if (value.mode === "proposal" || value.mode === "detail") {
+    return value.mode;
+  }
+
+  return "analysis";
 }
 
-function getAnalysisText(value: unknown) {
+function getAnalysisData(value: unknown) {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const analysis = value.analysis;
+
+  if (isRecord(analysis)) {
+    const data = analysis as Partial<StrategicAnalysis>;
+
+    if (
+      typeof data.companyAnalysis === "string" &&
+      typeof data.competitiveAdvantage === "string" &&
+      typeof data.industryIssues === "string" &&
+      typeof data.regionalFit === "string" &&
+      typeof data.donationThemeHypothesis === "string"
+    ) {
+      return data as StrategicAnalysis;
+    }
+  }
+
+  return null;
+}
+
+function getProposalText(value: unknown) {
   if (!isRecord(value)) {
     return "";
   }
 
-  const analysis = value.analysis;
-  return typeof analysis === "string" ? analysis.trim() : "";
+  const proposalText = value.proposalText;
+  return typeof proposalText === "string" ? proposalText.trim() : "";
 }
 
 function escapeRegExp(value: string) {
@@ -459,11 +538,22 @@ export async function POST(request: Request) {
 
     const model = process.env.OPENAI_MODEL || "gpt-5";
     const mode = getMode(body);
-    const analysisText = getAnalysisText(body);
+    const analysisData = getAnalysisData(body);
+    const proposalText = getProposalText(body);
 
     if (!process.env.OPENAI_API_KEY) {
       const notice =
         "OPENAI_API_KEY が未設定のため、サンプルを生成しました。.env.local に API キーを設定するとAI生成に切り替わります。";
+
+      if (mode === "detail") {
+        return NextResponse.json({
+          detail:
+            "## KPI\n採用応募数、自治体接点数、メディア露出数を確認します。\n\n## 営業メール\nSTEP2提案をもとに個別送付文を作成します。\n\n## PDF用詳細\n提案背景、自治体候補、PR展開を提案書化します。\n\n## 役員説明\n人的資本、ESG、営業ブランド投資として説明します。",
+          demo: true,
+          model: "demo",
+          notice
+        } satisfies DetailResponse);
+      }
 
       return NextResponse.json(
         mode === "analysis"
@@ -472,9 +562,16 @@ export async function POST(request: Request) {
       );
     }
 
-    if (mode === "proposal" && !analysisText) {
+    if ((mode === "proposal" || mode === "detail") && !analysisData) {
       return NextResponse.json(
         { error: "先に企業分析を生成してください。" },
+        { status: 400 }
+      );
+    }
+
+    if (mode === "detail" && !proposalText) {
+      return NextResponse.json(
+        { error: "先に提案を生成してください。" },
         { status: 400 }
       );
     }
@@ -534,9 +631,10 @@ export async function POST(request: Request) {
       }
 
       try {
-        const analysis = extractResponseText(response);
+        const analysis = parseAnalysisJson(extractResponseText(response), input);
         return NextResponse.json({
           analysis,
+          analysisText: formatAnalysisText(analysis),
           demo: false,
           model
         } satisfies AnalysisResponse);
@@ -555,12 +653,65 @@ export async function POST(request: Request) {
       }
     }
 
+    if (mode === "detail" && analysisData) {
+      const response = await client.responses
+        .create(
+          {
+            model,
+            instructions: systemPrompt,
+            input: `${buildDetailPrompt(input, analysisData, proposalText)}\n\n${detailOutputInstruction}`,
+            max_output_tokens: DETAIL_OUTPUT_TOKEN_LIMIT,
+            stream: false
+          },
+          {
+            maxRetries: 0,
+            timeout: OPENAI_TIMEOUT_MS
+          }
+        )
+        .catch((error: unknown) => {
+          logOpenAIError("client.responses.create.detail", error);
+
+          const detail =
+            error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
+          return {
+            detail:
+              "## KPI\n採用応募数、自治体接点数、メディア露出数を追います。\n\n## 営業メール\n分析と提案をもとに個別メールを作成します。\n\n## PDF用詳細\n提案背景、自治体候補、PR展開を整理します。\n\n## 役員説明\n人的資本、ESG、営業ブランド投資として説明します。",
+            demo: true,
+            model,
+            notice: `詳細生成が制限時間内に完了しなかったため、サンプル詳細を表示しています${detail}`
+          } satisfies DetailResponse;
+        });
+
+      if ("detail" in response) {
+        return NextResponse.json(response);
+      }
+
+      try {
+        const detail = extractResponseText(response);
+        return NextResponse.json({
+          detail,
+          demo: false,
+          model
+        } satisfies DetailResponse);
+      } catch (error) {
+        logRouteError("extractDetailText", error);
+
+        return NextResponse.json({
+          detail:
+            "## KPI\n採用応募数、自治体接点数、メディア露出数を追います。\n\n## 営業メール\n分析と提案をもとに個別メールを作成します。\n\n## PDF用詳細\n提案背景、自治体候補、PR展開を整理します。\n\n## 役員説明\n人的資本、ESG、営業ブランド投資として説明します。",
+          demo: true,
+          model,
+          notice: "AIの詳細結果を取得できなかったため、サンプル詳細を表示しています。"
+        } satisfies DetailResponse);
+      }
+    }
+
     const response = await client.responses
       .create(
         {
           model,
           instructions: systemPrompt,
-          input: `${buildProposalPrompt(input, analysisText)}\n\n${proposalOutputInstruction}`,
+          input: `${buildProposalPrompt(input, analysisData as StrategicAnalysis)}\n\n${proposalOutputInstruction}`,
           max_output_tokens: PROPOSAL_OUTPUT_TOKEN_LIMIT,
           stream: false
         },

@@ -66,8 +66,24 @@ export type ProposalOutput = {
   channelPlans: ChannelPlan[];
 };
 
+export type StrategicAnalysis = {
+  companyAnalysis: string;
+  competitiveAdvantage: string;
+  industryIssues: string;
+  regionalFit: string;
+  donationThemeHypothesis: string;
+};
+
 export type AnalysisResponse = {
-  analysis: string;
+  analysis: StrategicAnalysis;
+  analysisText: string;
+  demo: boolean;
+  model: string;
+  notice?: string;
+};
+
+export type DetailResponse = {
+  detail: string;
   demo: boolean;
   model: string;
   notice?: string;

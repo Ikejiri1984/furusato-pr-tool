@@ -5,16 +5,21 @@ import { useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
 import { CompanyForm } from "@/components/CompanyForm";
+import { DetailCard } from "@/components/DetailCard";
 import { LoadingState } from "@/components/LoadingState";
 import { ProposalReport } from "@/components/ProposalReport";
+import { formatProposalForCopy } from "@/lib/format";
 import { emptyCompanyInput, sampleCompanyInput } from "@/lib/sample";
 import type {
   AnalysisResponse,
   CompanyInput,
+  DetailResponse,
   GenerateResponse
 } from "@/lib/types";
 
-type GenerateApiPayload = Partial<GenerateResponse & AnalysisResponse> & {
+type GenerateApiPayload = Partial<
+  GenerateResponse & AnalysisResponse & DetailResponse
+> & {
   error?: string;
 };
 
@@ -36,7 +41,10 @@ export function ProposalGenerator() {
   const [proposalResult, setProposalResult] = useState<GenerateResponse | null>(
     null
   );
-  const [loading, setLoading] = useState<"analysis" | "proposal" | null>(null);
+  const [detailResult, setDetailResult] = useState<DetailResponse | null>(null);
+  const [loading, setLoading] = useState<
+    "analysis" | "proposal" | "detail" | null
+  >(null);
   const [error, setError] = useState("");
 
   function updateInput(key: keyof CompanyInput, value: string) {
@@ -46,12 +54,14 @@ export function ProposalGenerator() {
     }));
     setAnalysisResult(null);
     setProposalResult(null);
+    setDetailResult(null);
   }
 
   async function handleAnalysis() {
     setLoading("analysis");
     setError("");
     setProposalResult(null);
+    setDetailResult(null);
 
     try {
       const response = await fetch("/api/generate", {
@@ -72,7 +82,12 @@ export function ProposalGenerator() {
         throw new Error(data.error || "企業分析に失敗しました。");
       }
 
-      if (!data.analysis || typeof data.demo !== "boolean" || !data.model) {
+      if (
+        !data.analysis ||
+        !data.analysisText ||
+        typeof data.demo !== "boolean" ||
+        !data.model
+      ) {
         throw new Error(data.error || "企業分析データの形式が正しくありません。");
       }
 
@@ -96,6 +111,7 @@ export function ProposalGenerator() {
 
     setLoading("proposal");
     setError("");
+    setDetailResult(null);
 
     try {
       const response = await fetch("/api/generate", {
@@ -133,6 +149,52 @@ export function ProposalGenerator() {
     }
   }
 
+  async function handleDetail() {
+    if (!analysisResult || !proposalResult) {
+      setError("先に企業分析と提案を生成してください。");
+      return;
+    }
+
+    setLoading("detail");
+    setError("");
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          ...input,
+          mode: "detail",
+          analysis: analysisResult.analysis,
+          proposalText: formatProposalForCopy(proposalResult.proposal)
+        })
+      });
+
+      const raw = await response.text();
+      const data = parseGeneratePayload(raw);
+
+      if (!response.ok) {
+        throw new Error(data.error || "詳細生成に失敗しました。");
+      }
+
+      if (!data.detail || typeof data.demo !== "boolean" || !data.model) {
+        throw new Error(data.error || "詳細データの形式が正しくありません。");
+      }
+
+      setDetailResult(data as DetailResponse);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "詳細生成に失敗しました。時間をおいて再実行してください。"
+      );
+    } finally {
+      setLoading(null);
+    }
+  }
+
   return (
     <div className="mx-auto grid w-full max-w-[1500px] gap-6 px-4 py-6 md:px-6 lg:grid-cols-[430px_minmax(0,1fr)]">
       <aside className="no-print lg:sticky lg:top-6 lg:self-start">
@@ -145,12 +207,14 @@ export function ProposalGenerator() {
             setInput(sampleCompanyInput);
             setAnalysisResult(null);
             setProposalResult(null);
+            setDetailResult(null);
             setError("");
           }}
           onReset={() => {
             setInput(emptyCompanyInput);
             setAnalysisResult(null);
             setProposalResult(null);
+            setDetailResult(null);
             setError("");
           }}
         />
@@ -164,7 +228,12 @@ export function ProposalGenerator() {
           </div>
         ) : null}
 
-        {loading === "analysis" ? <LoadingState /> : null}
+        {loading === "analysis" ? (
+          <LoadingState
+            title="分析中"
+            description="企業分析、競争優位性、業界課題、地域相性、寄付テーマ仮説を軽量生成しています。"
+          />
+        ) : null}
 
         {!analysisResult && loading !== "analysis" ? (
           <section className="rounded-lg border border-dashed border-neutral-300 bg-white p-8 text-center shadow-sm">
@@ -205,11 +274,16 @@ export function ProposalGenerator() {
             </button>
           </div>
           <p className="mt-3 text-sm leading-6 text-neutral-500">
-            STEP1の企業分析結果を使って、提案タイトル、概要、自治体候補、PR戦略、ニュース化シナリオを生成します。
+            STEP1のJSON分析結果を使って、提案タイトル、概要、自治体候補、PR戦略、TV/TVer/SNS施策、ニュース化シナリオ、営業活用方法を生成します。
           </p>
         </section>
 
-        {loading === "proposal" ? <LoadingState /> : null}
+        {loading === "proposal" ? (
+          <LoadingState
+            title="提案生成中"
+            description="STEP1の分析結果だけを入力にして、提案カードを生成しています。"
+          />
+        ) : null}
 
         {!proposalResult && loading !== "proposal" ? (
           <div className="rounded-lg border border-dashed border-neutral-300 bg-white p-10 text-center shadow-sm">
@@ -232,6 +306,42 @@ export function ProposalGenerator() {
             model={proposalResult.model}
             notice={proposalResult.notice}
           />
+        ) : null}
+
+        <section className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-teal-800">
+                Step 3
+              </p>
+              <h2 className="mt-2 text-lg font-bold text-neutral-950">
+                追加生成カード
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={handleDetail}
+              disabled={!proposalResult || loading === "detail"}
+              className="inline-flex h-11 items-center gap-2 rounded-md border border-neutral-200 px-5 text-sm font-bold text-neutral-800 transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:text-neutral-400"
+            >
+              <Sparkles size={17} />
+              {loading === "detail" ? "詳細生成中" : "詳細を生成"}
+            </button>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-neutral-500">
+            必要に応じて、KPI、営業メール、PDF用詳細、役員説明を追加生成します。
+          </p>
+        </section>
+
+        {loading === "detail" ? (
+          <LoadingState
+            title="詳細生成中"
+            description="KPI、営業メール、PDF用詳細、役員説明を追加生成しています。"
+          />
+        ) : null}
+
+        {detailResult && loading !== "detail" ? (
+          <DetailCard result={detailResult} />
         ) : null}
       </section>
     </div>

@@ -10,6 +10,14 @@ type AnalysisCardProps = {
 };
 
 export function AnalysisCard({ result }: AnalysisCardProps) {
+  const rows = [
+    ["企業分析", result.analysis.companyAnalysis],
+    ["競争優位性", result.analysis.competitiveAdvantage],
+    ["業界課題", result.analysis.industryIssues],
+    ["地域相性", result.analysis.regionalFit],
+    ["寄付テーマ仮説", result.analysis.donationThemeHypothesis]
+  ];
+
   return (
     <section className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
       {result.notice ? (
@@ -28,12 +36,20 @@ export function AnalysisCard({ result }: AnalysisCardProps) {
             企業分析
           </h2>
         </div>
-        <CopyButton text={result.analysis} />
+        <CopyButton text={result.analysisText} />
       </div>
 
-      <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-neutral-700">
-        {result.analysis}
-      </pre>
+      <div className="grid gap-3">
+        {rows.map(([label, value]) => (
+          <div
+            key={label}
+            className="rounded-md border border-neutral-100 bg-neutral-50 px-4 py-3"
+          >
+            <p className="text-xs font-bold text-neutral-500">{label}</p>
+            <p className="mt-1 text-sm leading-6 text-neutral-800">{value}</p>
+          </div>
+        ))}
+      </div>
 
       <div className="mt-4 flex flex-wrap gap-2 text-xs text-neutral-500">
         <span className="rounded-full border border-neutral-200 px-3 py-1">
