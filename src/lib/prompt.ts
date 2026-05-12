@@ -48,22 +48,23 @@ CSR情報: ${clip(input.csr, 160) || "未入力"}
 
 export function buildAnalysisPrompt(input: CompanyInput) {
   return `
-以下の企業情報をもとに、STEP1として軽量な企業分析JSONだけを作成してください。
+以下の企業情報をもとに、STEP1の軽量分析JSONだけを作成してください。
 
 ${formatCompanyInput(input)}
 
 出力要件:
 - JSONのみ。Markdown禁止。
-- 500 tokens以内。
-- STEP2の提案、自治体名、施策詳細は書かない。
-- 各値は80字以内。一般論は禁止。
-- 必ず以下キーだけを返す。
+- reasoningや長い前置きは禁止。
+- 提案、自治体名、PR施策詳細は書かない。
+- 各値は最大120字。長文禁止。
+- テンプレ禁止。業種、ニュース、CSR、採用情報から企業固有に推論する。
+- 製造業は高専採用、技能継承、GX。放送・メディアは広告市場縮小、TVer、IP、地域事業転換を踏まえる。
+- 必ず以下4キーだけを返す。
 
 {
-  "companyAnalysis": "企業分析",
-  "competitiveAdvantage": "競争優位性",
+  "companyCharacteristics": "企業特性",
   "industryIssues": "業界課題",
-  "regionalFit": "地域相性",
+  "regionalConnectivity": "地域接続性",
   "donationThemeHypothesis": "寄付テーマ仮説"
 }
 `.trim();

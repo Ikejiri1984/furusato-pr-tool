@@ -67,10 +67,9 @@ export type ProposalOutput = {
 };
 
 export type StrategicAnalysis = {
-  companyAnalysis: string;
-  competitiveAdvantage: string;
+  companyCharacteristics: string;
   industryIssues: string;
-  regionalFit: string;
+  regionalConnectivity: string;
   donationThemeHypothesis: string;
 };
 

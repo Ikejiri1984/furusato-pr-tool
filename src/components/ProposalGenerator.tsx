@@ -231,7 +231,7 @@ export function ProposalGenerator() {
         {loading === "analysis" ? (
           <LoadingState
             title="分析中"
-            description="企業分析、競争優位性、業界課題、地域相性、寄付テーマ仮説を軽量生成しています。"
+            description="企業特性、業界課題、地域接続性、寄付テーマ仮説だけを高速生成しています。"
           />
         ) : null}
 
@@ -244,7 +244,7 @@ export function ProposalGenerator() {
               企業分析カード
             </p>
             <p className="mt-2 text-sm leading-6 text-neutral-500">
-              まず企業の事業構造、採用課題、ESG文脈、自治体接続理由を生成します。
+              まず企業特性、業界課題、地域接続性、寄付テーマ仮説を生成します。
             </p>
           </section>
         ) : null}

@@ -21,9 +21,12 @@ export const runtime = "nodejs";
 export const maxDuration = 15;
 
 const OPENAI_TIMEOUT_MS = 12000;
+const ANALYSIS_TIMEOUT_MS = 6000;
 const ANALYSIS_OUTPUT_TOKEN_LIMIT = 500;
 const PROPOSAL_OUTPUT_TOKEN_LIMIT = 900;
 const DETAIL_OUTPUT_TOKEN_LIMIT = 900;
+const DEFAULT_ANALYSIS_MODEL = "gpt-4.1-mini";
+const DEFAULT_PROPOSAL_MODEL = "gpt-5";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -107,13 +110,6 @@ function normalizeInput(value: unknown): CompanyInput | null {
   };
 }
 
-const analysisOutputInstruction = `
-出力形式:
-- JSONオブジェクトのみ返す。Markdownは禁止。
-- キーは companyAnalysis, competitiveAdvantage, industryIssues, regionalFit, donationThemeHypothesis の5つだけ。
-- 提案生成、自治体候補、PR施策は書かない。
-`.trim();
-
 const proposalOutputInstruction = `
 出力形式:
 - 通常テキストで返す。JSONは禁止。
@@ -146,24 +142,125 @@ function buildSafeFallbackPayload(
   };
 }
 
-function buildDemoAnalysis(input: CompanyInput) {
-  const demo = buildDemoProposal(input);
+function compact(value: string, limit = 120) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > limit
+    ? `${normalized.slice(0, Math.max(0, limit - 3))}...`
+    : normalized;
+}
+
+function includesAny(value: string, keywords: string[]) {
+  return keywords.some((keyword) => value.includes(keyword));
+}
+
+function buildRuleBasedAnalysis(input: CompanyInput) {
+  const industry = input.industry || "未特定業種";
+  const source = `${input.industry} ${input.news} ${input.csr} ${input.recruiting} ${input.painPoints} ${input.memo}`;
+  const newsHint = input.news ? `直近ニュース「${compact(input.news, 44)}」` : "";
+  const csrHint = input.csr ? `CSR「${compact(input.csr, 42)}」` : "";
+  const issueHint = input.painPoints
+    ? `課題感「${compact(input.painPoints, 40)}」`
+    : "";
+
+  const profile = (() => {
+    if (includesAny(source, ["製造", "メーカー", "工場", "機械", "部品", "素材"])) {
+      return {
+        characteristics:
+          "技術・設備・技能の蓄積を持つ事業で、地域のものづくり人材育成と接点を作りやすい。",
+        industryIssues:
+          "高専採用、技能継承、GX対応、工場人材不足が採用ブランドと直結する。",
+        regionalConnectivity:
+          "高専・工業高校・地場産業支援を持つ自治体と教育投資として接続できる。",
+        donationThemeHypothesis:
+          "次世代ものづくり人材育成、STEAM教育、地域産業基盤強化への寄付。"
+      };
+    }
+
+    if (includesAny(source, ["放送", "テレビ", "メディア", "広告", "番組"])) {
+      return {
+        characteristics:
+          "地域発信と映像制作の資産を持ち、広告外収益や地域事業転換を語りやすい。",
+        industryIssues:
+          "広告市場縮小、TVer競争、IP展開、若年層接点の再設計が課題になりやすい。",
+        regionalConnectivity:
+          "観光、移住、地域ブランディング、クリエイター育成を進める自治体と相性が良い。",
+        donationThemeHypothesis:
+          "地域発信人材育成、観光PR、自治体動画DX、クリエイター育成への寄付。"
+      };
+    }
+
+    if (includesAny(source, ["IT", "DX", "SaaS", "システム", "デジタル", "AI"])) {
+      return {
+        characteristics:
+          "デジタル実装力を持ち、自治体DXや教育DXを採用広報に転換しやすい。",
+        industryIssues:
+          "DX人材不足、導入支援の差別化、地方顧客開拓、採用認知の不足が課題。",
+        regionalConnectivity:
+          "デジタル教育、行政DX、地域企業の業務改善を進める自治体と接続できる。",
+        donationThemeHypothesis:
+          "地方DX人材育成、プログラミング教育、自治体業務DX実証への寄付。"
+      };
+    }
+
+    if (includesAny(source, ["インフラ", "電力", "エネルギー", "建設", "土木", "交通"])) {
+      return {
+        characteristics:
+          "社会基盤を支える事業で、防災・強靭化・エネルギーの公共性を打ち出せる。",
+        industryIssues:
+          "老朽化対応、担い手不足、防災投資、脱炭素対応が地域説明力を左右する。",
+        regionalConnectivity:
+          "防災、地域強靭化、インフラ維持、再エネに取り組む自治体と接続できる。",
+        donationThemeHypothesis:
+          "防災教育、地域インフラ人材育成、脱炭素・再エネ啓発への寄付。"
+      };
+    }
+
+    if (includesAny(source, ["食品", "飲料", "農業", "食", "外食"])) {
+      return {
+        characteristics:
+          "生活者接点と地域素材の文脈を持ち、食育や観光PRに展開しやすい。",
+        industryIssues:
+          "原材料高、地域ブランド化、食の安全、若年層接点、採用認知が課題。",
+        regionalConnectivity:
+          "農業、食育、観光、地域ブランド開発を進める自治体と接続しやすい。",
+        donationThemeHypothesis:
+          "食育、地域産品ブランド化、農業人材育成、観光コンテンツ開発への寄付。"
+      };
+    }
+
+    return {
+      characteristics:
+        "入力情報を起点に、採用・ESG・営業ブランドへ転換できる地域接点を探れる。",
+      industryIssues:
+        "採用認知、人的資本、ESGの説明力、地域での事業接点づくりが課題になりやすい。",
+      regionalConnectivity:
+        "教育、産業振興、若者流出、子育て、DXなど自治体課題と接続できる。",
+      donationThemeHypothesis:
+        "人材育成、地域産業支援、DX、若者定着を軸に寄付テーマを設計する。"
+    };
+  })();
 
   return {
-    companyAnalysis: demo.companyAnalysis,
-    competitiveAdvantage: demo.csrEsgPerspective[0],
-    industryIssues: demo.assumedIssues[0],
-    regionalFit: `${demo.municipalityThemes.slice(0, 3).join("、")}と接続しやすい。`,
-    donationThemeHypothesis: demo.donationStory
+    companyCharacteristics: compact(
+      `${industry}。${newsHint || csrHint || profile.characteristics}`,
+      120
+    ),
+    industryIssues: compact(issueHint || profile.industryIssues, 120),
+    regionalConnectivity: compact(
+      csrHint
+        ? `${csrHint}を自治体の教育・産業・若者定着課題に接続できる。`
+        : profile.regionalConnectivity,
+      120
+    ),
+    donationThemeHypothesis: compact(profile.donationThemeHypothesis, 120)
   } satisfies StrategicAnalysis;
 }
 
 function formatAnalysisText(analysis: StrategicAnalysis) {
   return [
-    `## 企業分析\n${analysis.companyAnalysis}`,
-    `## 競争優位性\n${analysis.competitiveAdvantage}`,
+    `## 企業特性\n${analysis.companyCharacteristics}`,
     `## 業界課題\n${analysis.industryIssues}`,
-    `## 地域相性\n${analysis.regionalFit}`,
+    `## 地域接続性\n${analysis.regionalConnectivity}`,
     `## 寄付テーマ仮説\n${analysis.donationThemeHypothesis}`
   ].join("\n\n");
 }
@@ -180,22 +277,26 @@ function parseAnalysisJson(text: string, input: CompanyInput) {
     const parsed = JSON.parse(jsonText) as Partial<StrategicAnalysis>;
 
     if (
-      typeof parsed.companyAnalysis === "string" &&
-      typeof parsed.competitiveAdvantage === "string" &&
+      typeof parsed.companyCharacteristics === "string" &&
       typeof parsed.industryIssues === "string" &&
-      typeof parsed.regionalFit === "string" &&
+      typeof parsed.regionalConnectivity === "string" &&
       typeof parsed.donationThemeHypothesis === "string"
     ) {
-      return parsed as StrategicAnalysis;
+      return {
+        companyCharacteristics: compact(parsed.companyCharacteristics),
+        industryIssues: compact(parsed.industryIssues),
+        regionalConnectivity: compact(parsed.regionalConnectivity),
+        donationThemeHypothesis: compact(parsed.donationThemeHypothesis)
+      } satisfies StrategicAnalysis;
     }
   } catch {
-    // Fall through to the safe demo-shaped analysis below.
+    // Fall through to the rule-based analysis below.
   }
 
-  const demo = buildDemoAnalysis(input);
+  const fallback = buildRuleBasedAnalysis(input);
   return {
-    ...demo,
-    companyAnalysis: stripped || demo.companyAnalysis
+    ...fallback,
+    companyCharacteristics: compact(stripped || fallback.companyCharacteristics)
   };
 }
 
@@ -204,7 +305,7 @@ function buildSafeAnalysisPayload(
   model: string,
   notice: string
 ): AnalysisResponse {
-  const analysis = buildDemoAnalysis(input);
+  const analysis = buildRuleBasedAnalysis(input);
 
   return {
     analysis,
@@ -238,10 +339,9 @@ function getAnalysisData(value: unknown) {
     const data = analysis as Partial<StrategicAnalysis>;
 
     if (
-      typeof data.companyAnalysis === "string" &&
-      typeof data.competitiveAdvantage === "string" &&
+      typeof data.companyCharacteristics === "string" &&
       typeof data.industryIssues === "string" &&
-      typeof data.regionalFit === "string" &&
+      typeof data.regionalConnectivity === "string" &&
       typeof data.donationThemeHypothesis === "string"
     ) {
       return data as StrategicAnalysis;
@@ -536,29 +636,31 @@ export async function POST(request: Request) {
       );
     }
 
-    const model = process.env.OPENAI_MODEL || "gpt-5";
+    const analysisModel =
+      process.env.OPENAI_ANALYSIS_MODEL || DEFAULT_ANALYSIS_MODEL;
+    const proposalModel = process.env.OPENAI_MODEL || DEFAULT_PROPOSAL_MODEL;
     const mode = getMode(body);
     const analysisData = getAnalysisData(body);
     const proposalText = getProposalText(body);
 
     if (!process.env.OPENAI_API_KEY) {
       const notice =
-        "OPENAI_API_KEY が未設定のため、サンプルを生成しました。.env.local に API キーを設定するとAI生成に切り替わります。";
+        "OPENAI_API_KEY が未設定のため、入力情報からルールベースで簡易生成しています。.env.local に API キーを設定するとAI生成に切り替わります。";
 
       if (mode === "detail") {
         return NextResponse.json({
           detail:
             "## KPI\n採用応募数、自治体接点数、メディア露出数を確認します。\n\n## 営業メール\nSTEP2提案をもとに個別送付文を作成します。\n\n## PDF用詳細\n提案背景、自治体候補、PR展開を提案書化します。\n\n## 役員説明\n人的資本、ESG、営業ブランド投資として説明します。",
           demo: true,
-          model: "demo",
+          model: "rule-based",
           notice
         } satisfies DetailResponse);
       }
 
       return NextResponse.json(
         mode === "analysis"
-          ? buildSafeAnalysisPayload(input, "demo", notice)
-          : buildSafeFallbackPayload(input, "demo", notice)
+          ? buildSafeAnalysisPayload(input, "rule-based", notice)
+          : buildSafeFallbackPayload(input, "rule-based", notice)
       );
     }
 
@@ -586,15 +688,14 @@ export async function POST(request: Request) {
       const response = await client.responses
         .create(
           {
-            model,
-            instructions: systemPrompt,
-            input: `${buildAnalysisPrompt(input)}\n\n${analysisOutputInstruction}`,
+            model: analysisModel,
+            input: buildAnalysisPrompt(input),
             max_output_tokens: ANALYSIS_OUTPUT_TOKEN_LIMIT,
             stream: false
           },
           {
             maxRetries: 0,
-            timeout: OPENAI_TIMEOUT_MS
+            timeout: ANALYSIS_TIMEOUT_MS
           }
         )
         .catch((error: unknown) => {
@@ -604,8 +705,8 @@ export async function POST(request: Request) {
             error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
           return buildSafeAnalysisPayload(
             input,
-            model,
-            `企業分析が制限時間内に完了しなかったため、サンプル分析を表示しています${detail}`
+            "rule-based",
+            `企業分析が制限時間内に完了しなかったため、入力情報からルールベース簡易分析を表示しています${detail}`
           );
         });
 
@@ -624,8 +725,8 @@ export async function POST(request: Request) {
         return NextResponse.json(
           buildSafeAnalysisPayload(
             input,
-            model,
-            `OpenAI APIでエラーが発生したため、サンプル分析を表示しています（${responseError.slice(0, 160)}）`
+            "rule-based",
+            `OpenAI APIでエラーが発生したため、入力情報からルールベース簡易分析を表示しています（${responseError.slice(0, 160)}）`
           )
         );
       }
@@ -636,7 +737,7 @@ export async function POST(request: Request) {
           analysis,
           analysisText: formatAnalysisText(analysis),
           demo: false,
-          model
+          model: analysisModel
         } satisfies AnalysisResponse);
       } catch (error) {
         logRouteError("extractAnalysisText", error);
@@ -646,8 +747,8 @@ export async function POST(request: Request) {
         return NextResponse.json(
           buildSafeAnalysisPayload(
             input,
-            model,
-            `AIの分析結果を取得できなかったため、サンプル分析を表示しています${detail}`
+            "rule-based",
+            `AIの分析結果を取得できなかったため、入力情報からルールベース簡易分析を表示しています${detail}`
           )
         );
       }
@@ -657,7 +758,7 @@ export async function POST(request: Request) {
       const response = await client.responses
         .create(
           {
-            model,
+            model: proposalModel,
             instructions: systemPrompt,
             input: `${buildDetailPrompt(input, analysisData, proposalText)}\n\n${detailOutputInstruction}`,
             max_output_tokens: DETAIL_OUTPUT_TOKEN_LIMIT,
@@ -677,7 +778,7 @@ export async function POST(request: Request) {
             detail:
               "## KPI\n採用応募数、自治体接点数、メディア露出数を追います。\n\n## 営業メール\n分析と提案をもとに個別メールを作成します。\n\n## PDF用詳細\n提案背景、自治体候補、PR展開を整理します。\n\n## 役員説明\n人的資本、ESG、営業ブランド投資として説明します。",
             demo: true,
-            model,
+            model: proposalModel,
             notice: `詳細生成が制限時間内に完了しなかったため、サンプル詳細を表示しています${detail}`
           } satisfies DetailResponse;
         });
@@ -691,7 +792,7 @@ export async function POST(request: Request) {
         return NextResponse.json({
           detail,
           demo: false,
-          model
+          model: proposalModel
         } satisfies DetailResponse);
       } catch (error) {
         logRouteError("extractDetailText", error);
@@ -700,7 +801,7 @@ export async function POST(request: Request) {
           detail:
             "## KPI\n採用応募数、自治体接点数、メディア露出数を追います。\n\n## 営業メール\n分析と提案をもとに個別メールを作成します。\n\n## PDF用詳細\n提案背景、自治体候補、PR展開を整理します。\n\n## 役員説明\n人的資本、ESG、営業ブランド投資として説明します。",
           demo: true,
-          model,
+          model: proposalModel,
           notice: "AIの詳細結果を取得できなかったため、サンプル詳細を表示しています。"
         } satisfies DetailResponse);
       }
@@ -709,7 +810,7 @@ export async function POST(request: Request) {
     const response = await client.responses
       .create(
         {
-          model,
+          model: proposalModel,
           instructions: systemPrompt,
           input: `${buildProposalPrompt(input, analysisData as StrategicAnalysis)}\n\n${proposalOutputInstruction}`,
           max_output_tokens: PROPOSAL_OUTPUT_TOKEN_LIMIT,
@@ -727,7 +828,7 @@ export async function POST(request: Request) {
           error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
         return buildSafeFallbackPayload(
           input,
-          model,
+          proposalModel,
           `AI生成が制限時間内に完了しなかったため、軽量なサンプル提案を表示しています${detail}`
         );
       });
@@ -747,7 +848,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         buildSafeFallbackPayload(
           input,
-          model,
+          proposalModel,
           `OpenAI APIでエラーが発生したため、軽量なサンプル提案を表示しています（${responseError.slice(0, 160)}）`
         )
       );
@@ -765,7 +866,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         buildSafeFallbackPayload(
           input,
-          model,
+          proposalModel,
           `AIの返答を取得できなかったため、軽量なサンプル提案を表示しています${detail}`
         )
       );
@@ -775,7 +876,7 @@ export async function POST(request: Request) {
     const payload: GenerateResponse = {
       proposal,
       demo: false,
-      model
+      model: proposalModel
     };
 
     return NextResponse.json(payload);
