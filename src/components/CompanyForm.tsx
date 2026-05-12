@@ -167,7 +167,7 @@ export function CompanyForm({
         className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-neutral-950 px-5 text-sm font-bold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-400"
       >
         <Sparkles size={18} />
-        {loading ? "生成中" : "提案を生成する"}
+        {loading ? "分析中" : "企業分析を生成"}
       </button>
     </form>
   );

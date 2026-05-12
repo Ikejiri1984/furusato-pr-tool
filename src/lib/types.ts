@@ -66,6 +66,13 @@ export type ProposalOutput = {
   channelPlans: ChannelPlan[];
 };
 
+export type AnalysisResponse = {
+  analysis: string;
+  demo: boolean;
+  model: string;
+  notice?: string;
+};
+
 export type GenerateResponse = {
   proposal: ProposalOutput;
   demo: boolean;

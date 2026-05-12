@@ -2,14 +2,24 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 import { buildDemoProposal } from "@/lib/fallback";
-import { buildUserPrompt, systemPrompt } from "@/lib/prompt";
-import type { CompanyInput, GenerateResponse, ProposalOutput } from "@/lib/types";
+import {
+  buildAnalysisPrompt,
+  buildProposalPrompt,
+  systemPrompt
+} from "@/lib/prompt";
+import type {
+  AnalysisResponse,
+  CompanyInput,
+  GenerateResponse,
+  ProposalOutput
+} from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 15;
 
 const OPENAI_TIMEOUT_MS = 12000;
-const OUTPUT_TOKEN_LIMIT = 900;
+const ANALYSIS_OUTPUT_TOKEN_LIMIT = 500;
+const PROPOSAL_OUTPUT_TOKEN_LIMIT = 900;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -100,14 +110,21 @@ function normalizeInput(value: unknown): CompanyInput | null {
   };
 }
 
-const plainTextOutputInstruction = `
+const analysisOutputInstruction = `
 出力形式:
 - 通常テキストで返す。JSONは禁止。
-- Markdown見出しは指定の4セクションだけ使う。
-- 必ずSTEP1を先に出し、その分析結果を使ってSTEP2を出す。
-- 見出しは「## STEP1. 企業戦略分析」のように書く。
-- 各セクションは1から4行を目安に簡潔に書く。
-- TV/TVer/SNS施策、ニュース化シナリオ、営業活用、KPIは詳細生成用なので書かない。
+- 企業分析だけを返す。提案タイトルや自治体候補は書かない。
+- 見出しは指定7項目だけ使う。
+- 各項目は1行。長い前置きは禁止。
+`.trim();
+
+const proposalOutputInstruction = `
+出力形式:
+- 通常テキストで返す。JSONは禁止。
+- STEP1分析結果を前提にした提案だけを返す。企業分析を再計算しない。
+- 見出しは指定5項目だけ使う。
+- 自治体候補は3つ。
+- TV/TVer/SNS施策、営業活用、KPIの詳細は書かない。
 - 表、コードブロック、長い前置きは禁止。
 `.trim();
 
@@ -122,6 +139,46 @@ function buildSafeFallbackPayload(
     model,
     notice
   };
+}
+
+function buildDemoAnalysis(input: CompanyInput) {
+  const demo = buildDemoProposal(input);
+
+  return [
+    `## 事業構造\n${demo.companyAnalysis}`,
+    `## 競争環境\n${demo.assumedIssues[0]}`,
+    `## 採用課題\n${demo.recruitmentIssues[0]}`,
+    `## 人的資本課題\n${demo.csrEsgPerspective[0]}`,
+    `## ESG文脈\n${demo.csrEsgPerspective[1]}`,
+    `## ニュース化要素\n${demo.newsIdeas[0]}`,
+    `## 自治体と接続すべき理由\n${demo.municipalityThemes.slice(0, 3).join("、")}と接続しやすいため。`
+  ].join("\n\n");
+}
+
+function buildSafeAnalysisPayload(
+  input: CompanyInput,
+  model: string,
+  notice: string
+): AnalysisResponse {
+  return {
+    analysis: buildDemoAnalysis(input),
+    demo: true,
+    model,
+    notice
+  };
+}
+
+function getMode(value: unknown): "analysis" | "proposal" {
+  return isRecord(value) && value.mode === "proposal" ? "proposal" : "analysis";
+}
+
+function getAnalysisText(value: unknown) {
+  if (!isRecord(value)) {
+    return "";
+  }
+
+  const analysis = value.analysis;
+  return typeof analysis === "string" ? analysis.trim() : "";
 }
 
 function escapeRegExp(value: string) {
@@ -401,17 +458,25 @@ export async function POST(request: Request) {
     }
 
     const model = process.env.OPENAI_MODEL || "gpt-5";
+    const mode = getMode(body);
+    const analysisText = getAnalysisText(body);
 
     if (!process.env.OPENAI_API_KEY) {
-      const payload: GenerateResponse = {
-        proposal: buildDemoProposal(input),
-        demo: true,
-        model: "demo",
-        notice:
-          "OPENAI_API_KEY が未設定のため、サンプル提案を生成しました。.env.local に API キーを設定するとAI生成に切り替わります。"
-      };
+      const notice =
+        "OPENAI_API_KEY が未設定のため、サンプルを生成しました。.env.local に API キーを設定するとAI生成に切り替わります。";
 
-      return NextResponse.json(payload);
+      return NextResponse.json(
+        mode === "analysis"
+          ? buildSafeAnalysisPayload(input, "demo", notice)
+          : buildSafeFallbackPayload(input, "demo", notice)
+      );
+    }
+
+    if (mode === "proposal" && !analysisText) {
+      return NextResponse.json(
+        { error: "先に企業分析を生成してください。" },
+        { status: 400 }
+      );
     }
 
     const client = new OpenAI({
@@ -420,13 +485,83 @@ export async function POST(request: Request) {
       timeout: OPENAI_TIMEOUT_MS
     });
 
+    if (mode === "analysis") {
+      const response = await client.responses
+        .create(
+          {
+            model,
+            instructions: systemPrompt,
+            input: `${buildAnalysisPrompt(input)}\n\n${analysisOutputInstruction}`,
+            max_output_tokens: ANALYSIS_OUTPUT_TOKEN_LIMIT,
+            stream: false
+          },
+          {
+            maxRetries: 0,
+            timeout: OPENAI_TIMEOUT_MS
+          }
+        )
+        .catch((error: unknown) => {
+          logOpenAIError("client.responses.create.analysis", error);
+
+          const detail =
+            error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
+          return buildSafeAnalysisPayload(
+            input,
+            model,
+            `企業分析が制限時間内に完了しなかったため、サンプル分析を表示しています${detail}`
+          );
+        });
+
+      if ("analysis" in response) {
+        return NextResponse.json(response);
+      }
+
+      const responseError = extractResponseError(response);
+
+      if (responseError) {
+        console.error("[api/generate] OpenAI analysis response returned error", {
+          errorMessage: responseError,
+          response
+        });
+
+        return NextResponse.json(
+          buildSafeAnalysisPayload(
+            input,
+            model,
+            `OpenAI APIでエラーが発生したため、サンプル分析を表示しています（${responseError.slice(0, 160)}）`
+          )
+        );
+      }
+
+      try {
+        const analysis = extractResponseText(response);
+        return NextResponse.json({
+          analysis,
+          demo: false,
+          model
+        } satisfies AnalysisResponse);
+      } catch (error) {
+        logRouteError("extractAnalysisText", error);
+
+        const detail =
+          error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";
+        return NextResponse.json(
+          buildSafeAnalysisPayload(
+            input,
+            model,
+            `AIの分析結果を取得できなかったため、サンプル分析を表示しています${detail}`
+          )
+        );
+      }
+    }
+
     const response = await client.responses
       .create(
         {
           model,
           instructions: systemPrompt,
-          input: `${buildUserPrompt(input)}\n\n${plainTextOutputInstruction}`,
-          max_output_tokens: OUTPUT_TOKEN_LIMIT,
+          input: `${buildProposalPrompt(input, analysisText)}\n\n${proposalOutputInstruction}`,
+          max_output_tokens: PROPOSAL_OUTPUT_TOKEN_LIMIT,
           stream: false
         },
         {
@@ -435,7 +570,7 @@ export async function POST(request: Request) {
         }
       )
       .catch((error: unknown) => {
-        logOpenAIError("client.responses.create", error);
+        logOpenAIError("client.responses.create.proposal", error);
 
         const detail =
           error instanceof Error ? `（${error.message.slice(0, 160)}）` : "";

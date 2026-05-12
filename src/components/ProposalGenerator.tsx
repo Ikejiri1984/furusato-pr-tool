@@ -3,13 +3,18 @@
 import { AlertCircle, FileText, Sparkles } from "lucide-react";
 import { useState } from "react";
 
+import { AnalysisCard } from "@/components/AnalysisCard";
 import { CompanyForm } from "@/components/CompanyForm";
 import { LoadingState } from "@/components/LoadingState";
 import { ProposalReport } from "@/components/ProposalReport";
 import { emptyCompanyInput, sampleCompanyInput } from "@/lib/sample";
-import type { CompanyInput, GenerateResponse } from "@/lib/types";
+import type {
+  AnalysisResponse,
+  CompanyInput,
+  GenerateResponse
+} from "@/lib/types";
 
-type GenerateApiPayload = Partial<GenerateResponse> & {
+type GenerateApiPayload = Partial<GenerateResponse & AnalysisResponse> & {
   error?: string;
 };
 
@@ -25,8 +30,13 @@ function parseGeneratePayload(raw: string): GenerateApiPayload {
 
 export function ProposalGenerator() {
   const [input, setInput] = useState<CompanyInput>(sampleCompanyInput);
-  const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResponse | null>(
+    null
+  );
+  const [proposalResult, setProposalResult] = useState<GenerateResponse | null>(
+    null
+  );
+  const [loading, setLoading] = useState<"analysis" | "proposal" | null>(null);
   const [error, setError] = useState("");
 
   function updateInput(key: keyof CompanyInput, value: string) {
@@ -34,10 +44,57 @@ export function ProposalGenerator() {
       ...current,
       [key]: value
     }));
+    setAnalysisResult(null);
+    setProposalResult(null);
   }
 
-  async function handleSubmit() {
-    setLoading(true);
+  async function handleAnalysis() {
+    setLoading("analysis");
+    setError("");
+    setProposalResult(null);
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          ...input,
+          mode: "analysis"
+        })
+      });
+
+      const raw = await response.text();
+      const data = parseGeneratePayload(raw);
+
+      if (!response.ok) {
+        throw new Error(data.error || "企業分析に失敗しました。");
+      }
+
+      if (!data.analysis || typeof data.demo !== "boolean" || !data.model) {
+        throw new Error(data.error || "企業分析データの形式が正しくありません。");
+      }
+
+      setAnalysisResult(data as AnalysisResponse);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "企業分析に失敗しました。時間をおいて再実行してください。"
+      );
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function handleProposal() {
+    if (!analysisResult) {
+      setError("先に企業分析を生成してください。");
+      return;
+    }
+
+    setLoading("proposal");
     setError("");
 
     try {
@@ -46,7 +103,11 @@ export function ProposalGenerator() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(input)
+        body: JSON.stringify({
+          ...input,
+          mode: "proposal",
+          analysis: analysisResult.analysis
+        })
       });
 
       const raw = await response.text();
@@ -60,7 +121,7 @@ export function ProposalGenerator() {
         throw new Error(data.error || "提案データの形式が正しくありません。");
       }
 
-      setResult(data as GenerateResponse);
+      setProposalResult(data as GenerateResponse);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -68,7 +129,7 @@ export function ProposalGenerator() {
           : "提案生成に失敗しました。時間をおいて再実行してください。"
       );
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
 
@@ -77,13 +138,19 @@ export function ProposalGenerator() {
       <aside className="no-print lg:sticky lg:top-6 lg:self-start">
         <CompanyForm
           value={input}
-          loading={loading}
+          loading={loading === "analysis"}
           onChange={updateInput}
-          onSubmit={handleSubmit}
-          onSample={() => setInput(sampleCompanyInput)}
+          onSubmit={handleAnalysis}
+          onSample={() => {
+            setInput(sampleCompanyInput);
+            setAnalysisResult(null);
+            setProposalResult(null);
+            setError("");
+          }}
           onReset={() => {
             setInput(emptyCompanyInput);
-            setResult(null);
+            setAnalysisResult(null);
+            setProposalResult(null);
             setError("");
           }}
         />
@@ -97,37 +164,74 @@ export function ProposalGenerator() {
           </div>
         ) : null}
 
-        {loading ? <LoadingState /> : null}
+        {loading === "analysis" ? <LoadingState /> : null}
 
-        {!loading && result ? (
-          <ProposalReport
-            proposal={result.proposal}
-            demo={result.demo}
-            model={result.model}
-            notice={result.notice}
-          />
+        {!analysisResult && loading !== "analysis" ? (
+          <section className="rounded-lg border border-dashed border-neutral-300 bg-white p-8 text-center shadow-sm">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-neutral-950 text-white">
+              <FileText size={24} />
+            </div>
+            <p className="mt-5 text-base font-bold text-neutral-950">
+              企業分析カード
+            </p>
+            <p className="mt-2 text-sm leading-6 text-neutral-500">
+              まず企業の事業構造、採用課題、ESG文脈、自治体接続理由を生成します。
+            </p>
+          </section>
         ) : null}
 
-        {!loading && !result ? (
+        {analysisResult ? (
+          <AnalysisCard result={analysisResult} />
+        ) : null}
+
+        <section className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-teal-800">
+                Step 2
+              </p>
+              <h2 className="mt-2 text-lg font-bold text-neutral-950">
+                提案カード
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={handleProposal}
+              disabled={!analysisResult || loading === "proposal"}
+              className="inline-flex h-11 items-center gap-2 rounded-md bg-neutral-950 px-5 text-sm font-bold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-400"
+            >
+              <Sparkles size={17} />
+              {loading === "proposal" ? "提案生成中" : "提案を生成"}
+            </button>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-neutral-500">
+            STEP1の企業分析結果を使って、提案タイトル、概要、自治体候補、PR戦略、ニュース化シナリオを生成します。
+          </p>
+        </section>
+
+        {loading === "proposal" ? <LoadingState /> : null}
+
+        {!proposalResult && loading !== "proposal" ? (
           <div className="rounded-lg border border-dashed border-neutral-300 bg-white p-10 text-center shadow-sm">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-neutral-950 text-white">
               <FileText size={24} />
             </div>
             <p className="mt-5 text-base font-bold text-neutral-950">
-              提案書プレビュー
+              提案プレビュー
             </p>
             <p className="mt-2 text-sm leading-6 text-neutral-500">
-              企業情報から、自治体候補、PR戦略、TV/TVer/SNS施策、営業メールまで生成します。
+              企業分析を生成すると、分析結果を使った提案生成に進めます。
             </p>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              className="mt-6 inline-flex h-11 items-center gap-2 rounded-md bg-neutral-950 px-5 text-sm font-bold text-white transition hover:bg-neutral-800"
-            >
-              <Sparkles size={17} />
-              提案を生成する
-            </button>
           </div>
+        ) : null}
+
+        {proposalResult && loading !== "proposal" ? (
+          <ProposalReport
+            proposal={proposalResult.proposal}
+            demo={proposalResult.demo}
+            model={proposalResult.model}
+            notice={proposalResult.notice}
+          />
         ) : null}
       </section>
     </div>
