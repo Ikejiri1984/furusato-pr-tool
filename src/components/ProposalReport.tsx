@@ -94,7 +94,7 @@ export function ProposalReport({
         </div>
         <div className="mt-6 flex flex-wrap gap-2 text-xs">
           <span className="rounded-full border border-white/15 px-3 py-1 text-neutral-200">
-            {demo ? "Demo Mode" : "AI Generated"}
+            {demo ? "ルールベース構築" : "AI変数 + テンプレート"}
           </span>
           <span className="rounded-full border border-white/15 px-3 py-1 text-neutral-200">
             Model: {model}

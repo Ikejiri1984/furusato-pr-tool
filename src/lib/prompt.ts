@@ -75,8 +75,8 @@ export function buildProposalPrompt(
   analysis: StrategicAnalysis
 ) {
   return `
-以下のSTEP1分析結果を使って、STEP2として提案だけを作成してください。
-重要: STEP1を再計算しない。分析結果を前提に「なぜこの企業にこの自治体なのか」を具体的に説明してください。
+以下のSTEP1分析結果を使って、STEP2の戦略変数JSONだけを返してください。
+提案本文、自治体実名、KPI、メール、PR施策本文はアプリ側で構築します。
 
 ${formatCompanyInput(input)}
 
@@ -84,19 +84,22 @@ STEP1分析JSON:
 ${JSON.stringify(analysis)}
 
 出力要件:
-- 一般論、どの企業にも言える表現は禁止。
-- 「地域共創」という抽象ワードの連発は禁止。
-- 業界構造や市場変化を踏まえる。
-- 自治体候補は3つ。それぞれ相性、テーマ、ニュース化ポイントを書く。
-- KPI、営業メール、PDF用詳細、役員説明はSTEP3で扱うため書かない。
+- JSONのみ。Markdown禁止。
+- 各値は短く、最大40字目安。
+- recommended_industries は最大3件の文字列配列。
+- suggested_municipality_type は「工業都市」「人口減少地域」「観光強化地域」「DX推進地域」「教育連携地域」「防災強化地域」「農業・食育地域」「クリエイター育成地域」などカテゴリだけ。自治体名は禁止。
+- テンプレ禁止。STEP1分析を前提に企業固有の角度を選ぶ。
 
-## 提案タイトル
-## 提案概要
-## 自治体候補
-## PR戦略
-## TV/TVer/SNS施策
-## ニュース化シナリオ
-## 営業活用方法
+{
+  "core_theme": "中核テーマ",
+  "target_region": "狙う地域カテゴリ",
+  "media_angle": "媒体上の切り口",
+  "pr_hook": "ニュース化フック",
+  "recruiting_angle": "採用広報角度",
+  "esg_angle": "ESG角度",
+  "recommended_industries": ["関連産業1", "関連産業2"],
+  "suggested_municipality_type": "自治体カテゴリ"
+}
 `.trim();
 }
 

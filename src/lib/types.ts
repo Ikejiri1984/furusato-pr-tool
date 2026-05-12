@@ -73,6 +73,17 @@ export type StrategicAnalysis = {
   donationThemeHypothesis: string;
 };
 
+export type ProposalVariables = {
+  core_theme: string;
+  target_region: string;
+  media_angle: string;
+  pr_hook: string;
+  recruiting_angle: string;
+  esg_angle: string;
+  recommended_industries: string[];
+  suggested_municipality_type: string;
+};
+
 export type AnalysisResponse = {
   analysis: StrategicAnalysis;
   analysisText: string;
@@ -93,4 +104,5 @@ export type GenerateResponse = {
   demo: boolean;
   model: string;
   notice?: string;
+  variables?: ProposalVariables;
 };

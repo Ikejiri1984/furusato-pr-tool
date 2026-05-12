@@ -274,14 +274,14 @@ export function ProposalGenerator() {
             </button>
           </div>
           <p className="mt-3 text-sm leading-6 text-neutral-500">
-            STEP1のJSON分析結果を使って、提案タイトル、概要、自治体候補、PR戦略、TV/TVer/SNS施策、ニュース化シナリオ、営業活用方法を生成します。
+            STEP1のJSON分析結果からAIが戦略変数だけを抽出し、提案本文は業種別テンプレートで高速構築します。
           </p>
         </section>
 
         {loading === "proposal" ? (
           <LoadingState
-            title="提案生成中"
-            description="STEP1の分析結果だけを入力にして、提案カードを生成しています。"
+            title="戦略変数を生成中"
+            description="AIは短いJSON変数だけを返し、自治体候補やPR施策はテンプレートで組み立てています。"
           />
         ) : null}
 
